@@ -1,23 +1,25 @@
 from __future__ import annotations
 
-from itertools import count
 from typing import Iterable
 
-from store.item.models import ItemEntity
+from sqlalchemy import select
 
-_items: dict[int, ItemEntity] = {}
-_id_generator = count(start=1)
+from store.db import SessionLocal
+from store.item.models import ItemEntity, ItemOrm
 
 
 def add(name: str, price: float) -> ItemEntity:
-    item_id = next(_id_generator)
-    entity = ItemEntity(id=item_id, name=name, price=price, deleted=False)
-    _items[item_id] = entity
-    return entity
+    with SessionLocal.begin() as session:
+        item = ItemOrm(name=name, price=price)
+        session.add(item)
+        session.flush()
+        return item.to_entity()
 
 
 def get(item_id: int) -> ItemEntity | None:
-    return _items.get(item_id)
+    with SessionLocal() as session:
+        item = session.get(ItemOrm, item_id)
+        return item.to_entity() if item is not None else None
 
 
 def get_many(
@@ -27,25 +29,21 @@ def get_many(
     max_price: float | None = None,
     show_deleted: bool = False,
 ) -> Iterable[ItemEntity]:
-    result = []
-    for entity in _items.values():
-        if not show_deleted and entity.deleted:
-            continue
-        if min_price is not None and entity.price < min_price:
-            continue
-        if max_price is not None and entity.price > max_price:
-            continue
-        result.append(entity)
-    return result[offset : offset + limit]
+    query = select(ItemOrm)
+    if not show_deleted:
+        query = query.where(ItemOrm.deleted.is_(False))
+    if min_price is not None:
+        query = query.where(ItemOrm.price >= min_price)
+    if max_price is not None:
+        query = query.where(ItemOrm.price <= max_price)
+    query = query.order_by(ItemOrm.id).offset(offset).limit(limit)
+
+    with SessionLocal() as session:
+        return [item.to_entity() for item in session.scalars(query)]
 
 
 def replace(item_id: int, name: str, price: float) -> ItemEntity | None:
-    entity = _items.get(item_id)
-    if entity is None:
-        return None
-    entity.name = name
-    entity.price = price
-    return entity
+    return patch(item_id, name=name, price=price)
 
 
 def patch(
@@ -53,18 +51,21 @@ def patch(
     name: str | None = None,
     price: float | None = None,
 ) -> ItemEntity | None:
-    entity = _items.get(item_id)
-    if entity is None:
-        return None
-    if name is not None:
-        entity.name = name
-    if price is not None:
-        entity.price = price
-    return entity
+    with SessionLocal.begin() as session:
+        item = session.get(ItemOrm, item_id)
+        if item is None:
+            return None
+        if name is not None:
+            item.name = name
+        if price is not None:
+            item.price = price
+        return item.to_entity()
 
 
 def delete(item_id: int) -> ItemEntity | None:
-    entity = _items.get(item_id)
-    if entity is not None:
-        entity.deleted = True
-    return entity
+    with SessionLocal.begin() as session:
+        item = session.get(ItemOrm, item_id)
+        if item is None:
+            return None
+        item.deleted = True
+        return item.to_entity()

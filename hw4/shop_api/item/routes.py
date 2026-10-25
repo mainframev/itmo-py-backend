@@ -15,13 +15,13 @@ router = APIRouter()
 
 
 @router.post("", status_code=HTTPStatus.CREATED)
-async def create_item(item: ItemRequest) -> ItemResponse:
+def create_item(item: ItemRequest) -> ItemResponse:
     entity = queries.add(name=item.name, price=item.price)
     return ItemResponse.from_entity(entity)
 
 
 @router.get("")
-async def get_item_list(
+def get_item_list(
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(gt=0)] = 10,
     min_price: Annotated[float | None, Query(ge=0)] = None,
@@ -39,7 +39,7 @@ async def get_item_list(
 
 
 @router.get("/{id}")
-async def get_item_by_id(id: int) -> ItemResponse:
+def get_item_by_id(id: int) -> ItemResponse:
     entity = queries.get(id)
     if entity is None or entity.deleted:
         raise HTTPException(
@@ -50,7 +50,7 @@ async def get_item_by_id(id: int) -> ItemResponse:
 
 
 @router.put("/{id}")
-async def replace_item(id: int, item: PutItemRequest) -> ItemResponse:
+def replace_item(id: int, item: PutItemRequest) -> ItemResponse:
     entity = queries.replace(id, name=item.name, price=item.price)
     if entity is None:
         raise HTTPException(
@@ -61,7 +61,7 @@ async def replace_item(id: int, item: PutItemRequest) -> ItemResponse:
 
 
 @router.patch("/{id}")
-async def update_item(id: int, item: PatchItemRequest) -> ItemResponse:
+def update_item(id: int, item: PatchItemRequest) -> ItemResponse:
     entity = queries.get(id)
     if entity is None:
         raise HTTPException(
@@ -75,6 +75,6 @@ async def update_item(id: int, item: PatchItemRequest) -> ItemResponse:
 
 
 @router.delete("/{id}")
-async def delete_item(id: int) -> Response:
+def delete_item(id: int) -> Response:
     queries.delete(id)
     return Response(status_code=HTTPStatus.OK)

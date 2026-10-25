@@ -1,45 +1,65 @@
 from __future__ import annotations
 
-from itertools import count
 from typing import Iterable
 
-from store.cart.models import CartEntity
-from store.item import queries as item_queries
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.orm import Session
 
-_carts: dict[int, CartEntity] = {}
-_id_generator = count(start=1)
+from store.cart.models import CartEntity, CartItemEntity, CartItemOrm, CartOrm
+from store.db import SessionLocal
+from store.item.models import ItemOrm
+
+
+def _load(session: Session, cart_ids: list[int]) -> list[CartEntity]:
+    carts = {cart_id: CartEntity(id=cart_id) for cart_id in cart_ids}
+    rows = session.execute(
+        select(CartItemOrm.cart_id, CartItemOrm.quantity, ItemOrm)
+        .join(ItemOrm, ItemOrm.id == CartItemOrm.item_id)
+        .where(CartItemOrm.cart_id.in_(cart_ids))
+        .order_by(ItemOrm.id)
+    )
+    for cart_id, quantity, item in rows:
+        cart = carts[cart_id]
+        cart.items.append(
+            CartItemEntity(
+                id=item.id,
+                name=item.name,
+                quantity=quantity,
+                available=not item.deleted,
+            )
+        )
+        cart.price += item.price * quantity
+    return list(carts.values())
 
 
 def add() -> CartEntity:
-    cart_id = next(_id_generator)
-    entity = CartEntity(id=cart_id, items={})
-    _carts[cart_id] = entity
-    return entity
+    with SessionLocal.begin() as session:
+        cart = CartOrm()
+        session.add(cart)
+        session.flush()
+        return CartEntity(id=cart.id)
 
 
 def get(cart_id: int) -> CartEntity | None:
-    return _carts.get(cart_id)
+    with SessionLocal() as session:
+        if session.get(CartOrm, cart_id) is None:
+            return None
+        return _load(session, [cart_id])[0]
 
 
 def add_item(cart_id: int, item_id: int) -> CartEntity | None:
-    cart = _carts.get(cart_id)
-    if cart is None:
-        return None
-    cart.items[item_id] = cart.items.get(item_id, 0) + 1
-    return cart
-
-
-def total_price(cart: CartEntity) -> float:
-    price = 0.0
-    for item_id, quantity in cart.items.items():
-        item = item_queries.get(item_id)
-        if item is not None:
-            price += item.price * quantity
-    return price
-
-
-def total_quantity(cart: CartEntity) -> int:
-    return sum(cart.items.values())
+    with SessionLocal.begin() as session:
+        if session.get(CartOrm, cart_id) is None or session.get(ItemOrm, item_id) is None:
+            return None
+        stmt = insert(CartItemOrm).values(cart_id=cart_id, item_id=item_id, quantity=1)
+        session.execute(
+            stmt.on_conflict_do_update(
+                index_elements=[CartItemOrm.cart_id, CartItemOrm.item_id],
+                set_={"quantity": CartItemOrm.quantity + 1},
+            )
+        )
+        return _load(session, [cart_id])[0]
 
 
 def get_many(
@@ -50,17 +70,23 @@ def get_many(
     min_quantity: int | None = None,
     max_quantity: int | None = None,
 ) -> Iterable[CartEntity]:
-    result = []
-    for cart in _carts.values():
-        price = total_price(cart)
-        quantity = total_quantity(cart)
-        if min_price is not None and price < min_price:
-            continue
-        if max_price is not None and price > max_price:
-            continue
-        if min_quantity is not None and quantity < min_quantity:
-            continue
-        if max_quantity is not None and quantity > max_quantity:
-            continue
-        result.append(cart)
-    return result[offset : offset + limit]
+    price = func.coalesce(func.sum(ItemOrm.price * CartItemOrm.quantity), 0)
+    quantity = func.coalesce(func.sum(CartItemOrm.quantity), 0)
+    query = (
+        select(CartOrm.id)
+        .outerjoin(CartItemOrm)
+        .outerjoin(ItemOrm)
+        .group_by(CartOrm.id)
+    )
+    if min_price is not None:
+        query = query.having(price >= min_price)
+    if max_price is not None:
+        query = query.having(price <= max_price)
+    if min_quantity is not None:
+        query = query.having(quantity >= min_quantity)
+    if max_quantity is not None:
+        query = query.having(quantity <= max_quantity)
+    query = query.order_by(CartOrm.id).offset(offset).limit(limit)
+
+    with SessionLocal() as session:
+        return _load(session, list(session.scalars(query)))

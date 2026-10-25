@@ -10,14 +10,14 @@ router = APIRouter()
 
 
 @router.post("", status_code=HTTPStatus.CREATED)
-async def create_cart(response: Response) -> CartResponse:
+def create_cart(response: Response) -> CartResponse:
     entity = queries.add()
     response.headers["location"] = f"/cart/{entity.id}"
     return CartResponse.from_entity(entity)
 
 
 @router.get("")
-async def get_cart_list(
+def get_cart_list(
     offset: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(gt=0)] = 10,
     min_price: Annotated[float | None, Query(ge=0)] = None,
@@ -45,7 +45,7 @@ async def get_cart_list(
         },
     },
 )
-async def get_cart_by_id(id: int) -> CartResponse:
+def get_cart_by_id(id: int) -> CartResponse:
     entity = queries.get(id)
     if entity is None:
         raise HTTPException(
@@ -56,7 +56,7 @@ async def get_cart_by_id(id: int) -> CartResponse:
 
 
 @router.post("/{cart_id}/add/{item_id}")
-async def add_item_to_cart(cart_id: int, item_id: int) -> CartResponse:
+def add_item_to_cart(cart_id: int, item_id: int) -> CartResponse:
     entity = queries.add_item(cart_id, item_id)
     if entity is None:
         raise HTTPException(
