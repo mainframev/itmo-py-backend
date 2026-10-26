@@ -24,8 +24,12 @@ API: http://localhost:8080/docs, Postgres: `localhost:7432` (shop/shop).
 
 ```sh
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/pytest
+.venv/bin/pytest --cov=shop_api --cov=store --cov-report=term-missing
 ```
+
+ДЗ 5: к тестам ДЗ 2 добавил `tests/test_not_found.py` (404, повторное добавление
+в корзину, lifespan), покрытие 100%. В CI ([hw5-tests.yml](../.github/workflows/hw5-tests.yml))
+postgres поднимается как service container, пайплайн падает, если покрытие ниже 95%.
 
 ## Уровни изоляции
 
